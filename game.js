@@ -13,28 +13,40 @@ const teamPickerEl = document.querySelector("#teamPicker");
 const teamSelectEl = document.querySelector("#teamSelect");
 const opponentTeamSelectEl = document.querySelector("#opponentTeamSelect");
 const startGameEl = document.querySelector("#startGame");
+const pauseGameEl = document.querySelector("#pauseGame");
 const homeStatsLabelEl = document.querySelector("#homeStatsLabel");
 const awayStatsLabelEl = document.querySelector("#awayStatsLabel");
 const homeStatsEl = document.querySelector("#homeStats");
 const awayStatsEl = document.querySelector("#awayStats");
+const touchControlEls = document.querySelectorAll("[data-hold-key], [data-action], [data-shoot-control]");
+const pauseControlEls = document.querySelectorAll("#pauseGame, [data-action='togglePause']");
 
 const W = canvas.width;
 const H = canvas.height;
 const keys = new Set();
 const hoop = { x: W - 76, y: H / 2, r: 28, side: "right" };
 const awayHoop = { x: 76, y: H / 2, r: 28, side: "left" };
+const REGULATION_QUARTERS = 4;
+const QUARTER_SECONDS = 120;
+const OVERTIME_SECONDS = 30;
+const centerCourtLogo = new Image();
+const centerCourtLogoState = { team: null, ready: false, retryTimer: null };
 
 const state = {
   home: 0,
   away: 0,
-  time: 120,
-  period: "REG",
+  time: QUARTER_SECONDS,
+  quarter: 1,
+  period: "Q1",
   overtimeCount: 0,
   messageTimer: 0,
   shotHold: 0,
   charging: false,
+  paused: false,
   started: false,
   gameOver: false,
+  leagueGameContext: null,
+  leagueResultReported: false,
   lastShooter: null,
   stealTimer: 0,
   stealCooldown: 0,
@@ -115,7 +127,17 @@ const awayPersonalities = [
 ];
 
 function emptyStats() {
-  return { points: 0, assists: 0, rebounds: 0, steals: 0, blocks: 0, fieldGoalsMade: 0, fieldGoalsAttempted: 0 };
+  return {
+    points: 0,
+    assists: 0,
+    rebounds: 0,
+    steals: 0,
+    blocks: 0,
+    fieldGoalsMade: 0,
+    fieldGoalsAttempted: 0,
+    threePointersMade: 0,
+    threePointersAttempted: 0,
+  };
 }
 
 const homeTeam = homeSpots.map((spot, index) => ({
@@ -258,12 +280,16 @@ function initials(name) {
     .toUpperCase();
 }
 
+function teamLogoUrl(identity) {
+  return `https://cdn.nba.com/logos/nba/${identity.id}/primary/L/logo.svg`;
+}
+
 function updateBadge(element, identity) {
   const image = element.querySelector("img");
   element.classList.remove("logo-fallback");
   element.dataset.fallback = initials(identity.short);
   if (image && identity.id) {
-    image.src = `https://cdn.nba.com/logos/nba/${identity.id}/primary/L/logo.svg`;
+    image.src = teamLogoUrl(identity);
     image.onload = () => {
       element.classList.remove("logo-fallback");
       element.textContent = "";
@@ -281,6 +307,23 @@ function updateBadge(element, identity) {
   element.style.setProperty("--badge-trim", identity.trim);
 }
 
+function updateCenterCourtLogo(team) {
+  if (centerCourtLogoState.retryTimer) {
+    clearTimeout(centerCourtLogoState.retryTimer);
+    centerCourtLogoState.retryTimer = null;
+  }
+  centerCourtLogoState.team = team;
+  centerCourtLogoState.ready = false;
+  centerCourtLogo.onload = () => {
+    if (centerCourtLogoState.team === team) centerCourtLogoState.ready = true;
+  };
+  centerCourtLogo.onerror = () => {
+    if (centerCourtLogoState.team !== team) return;
+    centerCourtLogoState.retryTimer = setTimeout(() => updateCenterCourtLogo(team), 1200);
+  };
+  centerCourtLogo.src = teamLogoUrl(team);
+}
+
 function shortPlayerName(name) {
   const parts = name.split(" ");
   return parts.length > 1 ? parts[parts.length - 1] : name;
@@ -291,11 +334,16 @@ function fieldGoalLine(stats) {
   return `${pct}% ${stats.fieldGoalsMade}/${stats.fieldGoalsAttempted}`;
 }
 
+function threePointLine(stats) {
+  const pct = stats.threePointersAttempted ? Math.round((stats.threePointersMade / stats.threePointersAttempted) * 100) : 0;
+  return `${pct}% ${stats.threePointersMade}/${stats.threePointersAttempted}`;
+}
+
 function statRow(player, header) {
   if (header) {
-    return '<div class="stats-row stats-header"><span>#</span><span>Name</span><span>FG</span><span>PTS</span><span>AST</span><span>REB</span><span>STL</span><span>BLK</span></div>';
+    return '<div class="stats-row stats-header"><span>#</span><span>Name</span><span>FG</span><span>3P</span><span>PTS</span><span>AST</span><span>REB</span><span>STL</span><span>BLK</span></div>';
   }
-  return `<div class="stats-row"><span class="stat-num">${player.number}</span><span class="stat-name">${shortPlayerName(player.name)}</span><span class="stat-value">${fieldGoalLine(player.stats)}</span><span class="stat-value">${player.stats.points}</span><span class="stat-value">${player.stats.assists}</span><span class="stat-value">${player.stats.rebounds}</span><span class="stat-value">${player.stats.steals}</span><span class="stat-value">${player.stats.blocks}</span></div>`;
+  return `<div class="stats-row"><span class="stat-num">${player.number}</span><span class="stat-name">${shortPlayerName(player.name)}</span><span class="stat-value">${fieldGoalLine(player.stats)}</span><span class="stat-value">${threePointLine(player.stats)}</span><span class="stat-value">${player.stats.points}</span><span class="stat-value">${player.stats.assists}</span><span class="stat-value">${player.stats.rebounds}</span><span class="stat-value">${player.stats.steals}</span><span class="stat-value">${player.stats.blocks}</span></div>`;
 }
 
 function updateStatsPanel() {
@@ -530,6 +578,7 @@ function applyTeamIdentity(team, opponent) {
   awayTeamLabelEl.textContent = opponent.short;
   updateBadge(homeTeamLogoEl, team);
   updateBadge(awayTeamLogoEl, opponent);
+  updateCenterCourtLogo(team);
   const opponentJersey = awayUniformColor(team, opponent);
   const opponentTrim = opponentJersey === opponent.color ? opponent.trim : opponent.color;
   homeTeam.forEach((player, index) => {
@@ -558,9 +607,30 @@ function startGame() {
   }
   applyTeamIdentity(team, opponent);
   state.started = true;
+  state.leagueGameContext = null;
+  state.leagueResultReported = false;
   teamPickerEl.classList.add("hidden");
   restart();
   announce(`${team.short} vs ${opponent.short}. Jump ball.`);
+}
+
+function startShotCharge() {
+  if (!state.started || state.paused) return;
+  if (state.jumpBall) {
+    attemptJumpBall();
+    return;
+  }
+  if (!state.charging && ball.owner && ball.owner.team === "home" && !state.gameOver) {
+    state.charging = true;
+    state.shotHold = 0;
+  }
+}
+
+function releaseShotCharge() {
+  if (!state.started || !state.charging) return;
+  state.charging = false;
+  shoot();
+  state.shotHold = 0;
 }
 
 function nearestPlayer(team, point) {
@@ -573,6 +643,10 @@ function closestDefender(player) {
 
 function closestHomeDefender(player) {
   return homeTeam.reduce((best, defender) => (distance(defender, player) < distance(best, player) ? defender : best), homeTeam[0]);
+}
+
+function isThreePointAttempt(shooter) {
+  return shooter.team === "home" ? shooter.x < W - 360 : shooter.x > 360;
 }
 
 function userControlledPlayer() {
@@ -652,22 +726,70 @@ function givePossession(team, message) {
   announce(message || (team === "away" ? "Other team's ball. Play defense." : "Your ball."));
 }
 
+function formatClock() {
+  const seconds = Math.ceil(state.time);
+  const time = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  return `${state.period === "OT" ? `OT${state.overtimeCount}` : state.period} ${time}`;
+}
+
+function updateClockDisplay() {
+  clockEl.textContent = formatClock();
+}
+
+function updatePauseButton() {
+  pauseControlEls.forEach((button) => {
+    button.textContent = state.paused ? "Resume" : "Pause";
+    button.setAttribute("aria-pressed", String(state.paused));
+    button.classList.toggle("is-active", state.paused);
+  });
+}
+
+function togglePause() {
+  if (!state.started || state.gameOver) return;
+  state.paused = !state.paused;
+  state.charging = false;
+  state.shotHold = 0;
+  keys.clear();
+  updatePauseButton();
+  announce(state.paused ? "Paused." : "Back on court.");
+}
+
 function inboundAfterScore(scoredBy) {
   resetPlay(scoredBy);
   givePossession(scoredBy === "home" ? "away" : "home", scoredBy === "home" ? "Score. Other team's ball." : "They scored. Your ball.");
 }
 
+function startNextQuarter() {
+  state.quarter += 1;
+  state.period = `Q${state.quarter}`;
+  state.time = QUARTER_SECONDS;
+  resetPlay("quarter");
+  givePossession(state.quarter % 2 === 0 ? "away" : "home", `Quarter ${state.quarter}. ${state.quarter % 2 === 0 ? "Other team's ball." : "Your ball."}`);
+  updateClockDisplay();
+}
+
 function startOvertime() {
-  state.time = 30;
+  state.time = OVERTIME_SECONDS;
   state.period = "OT";
   state.overtimeCount += 1;
   setupJumpBall();
   announce(`Overtime ${state.overtimeCount}. 30 seconds.`);
+  updateClockDisplay();
 }
 
 function endGame() {
   state.gameOver = true;
   announce(state.home === state.away ? "Final: tied game." : state.home > state.away ? "Final: home wins." : "Final: away wins.");
+  if (state.leagueGameContext && !state.leagueResultReported && window.PixelCourtLeagueComplete) {
+    state.leagueResultReported = true;
+    window.PixelCourtLeagueComplete({
+      context: state.leagueGameContext,
+      userScore: state.home,
+      opponentScore: state.away,
+      homePlayers: homeTeam.map((player) => ({ name: player.name, number: player.number, stats: Object.assign({}, player.stats) })),
+      awayPlayers: awayTeam.map((player) => ({ name: player.name, number: player.number, stats: Object.assign({}, player.stats) })),
+    });
+  }
 }
 
 function attemptJumpBall() {
@@ -735,13 +857,18 @@ function restart() {
   if (!state.started) return;
   state.home = 0;
   state.away = 0;
-  state.time = 120;
-  state.period = "REG";
+  state.time = QUARTER_SECONDS;
+  state.quarter = 1;
+  state.period = "Q1";
   state.overtimeCount = 0;
+  state.paused = false;
   state.gameOver = false;
+  state.leagueResultReported = false;
   resetStats();
   homeScoreEl.textContent = state.home;
   awayScoreEl.textContent = state.away;
+  updateClockDisplay();
+  updatePauseButton();
   updateStatsPanel();
   setupJumpBall();
   announce("Jump ball. Press Space as it drops.");
@@ -828,6 +955,38 @@ function blockShot() {
   } else {
     announce("Block attempt.");
   }
+}
+
+const touchActions = {
+  dunkBall,
+  passBall,
+  stealBall,
+  blockShot,
+  togglePause,
+};
+
+function releaseTouchButton(button) {
+  button.classList.remove("is-held");
+  if (button.dataset.holdKey) keys.delete(button.dataset.holdKey);
+  if (button.hasAttribute("data-shoot-control")) releaseShotCharge();
+}
+
+function setupTouchControls() {
+  touchControlEls.forEach((button) => {
+    button.addEventListener("contextmenu", (event) => event.preventDefault());
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      button.setPointerCapture(event.pointerId);
+      button.classList.add("is-held");
+
+      if (button.dataset.holdKey) keys.add(button.dataset.holdKey);
+      if (button.dataset.action && touchActions[button.dataset.action] && (!state.paused || button.dataset.action === "togglePause")) touchActions[button.dataset.action]();
+      if (button.hasAttribute("data-shoot-control")) startShotCharge();
+    });
+    button.addEventListener("pointerup", () => releaseTouchButton(button));
+    button.addEventListener("pointercancel", () => releaseTouchButton(button));
+    button.addEventListener("lostpointercapture", () => releaseTouchButton(button));
+  });
 }
 
 function cpuStealBall(defender) {
@@ -932,13 +1091,15 @@ function shoot() {
   const targetOffset = made ? 0 : (Math.random() < 0.5 ? -42 : 42);
 
   state.lastShooter = shooter;
+  const points = isThreePointAttempt(shooter) ? 3 : 2;
   shooter.stats.fieldGoalsAttempted += 1;
+  if (points === 3) shooter.stats.threePointersAttempted += 1;
   if (cpuBlockShot(shooter)) return;
 
   ball.owner = null;
   ball.pass = false;
   ball.shot = true;
-  ball.target = { x: hoop.x + targetOffset, y: hoop.y + (made ? 0 : Math.random() * 46 - 23), made, team: "home" };
+  ball.target = { x: hoop.x + targetOffset, y: hoop.y + (made ? 0 : Math.random() * 46 - 23), made, team: "home", points };
   ball.vx = (ball.target.x - ball.x) / 52;
   ball.vy = (ball.target.y - ball.y) / 52;
   ball.z = 22;
@@ -955,11 +1116,13 @@ function shootAway(shooter) {
   const targetOffset = made ? 0 : (Math.random() < 0.5 ? -42 : 42);
 
   state.lastShooter = shooter;
+  const points = isThreePointAttempt(shooter) ? 3 : 2;
   shooter.stats.fieldGoalsAttempted += 1;
+  if (points === 3) shooter.stats.threePointersAttempted += 1;
   ball.owner = null;
   ball.pass = false;
   ball.shot = true;
-  ball.target = { x: awayHoop.x + targetOffset, y: awayHoop.y + (made ? 0 : Math.random() * 46 - 23), made, team: "away" };
+  ball.target = { x: awayHoop.x + targetOffset, y: awayHoop.y + (made ? 0 : Math.random() * 46 - 23), made, team: "away", points };
   ball.vx = (ball.target.x - ball.x) / 52;
   ball.vy = (ball.target.y - ball.y) / 52;
   ball.z = 22;
@@ -1122,10 +1285,11 @@ function updateBall(dt) {
 
   if (ball.shot && ball.target && Math.hypot(ball.x - ball.target.x, ball.y - ball.target.y) < 18 && ball.target.made) {
     if (ball.target.team === "away") {
-      const points = state.lastShooter && state.lastShooter.x > 360 ? 3 : 2;
+      const points = ball.target.points || 2;
       if (state.lastShooter) {
         state.lastShooter.stats.points += points;
         state.lastShooter.stats.fieldGoalsMade += 1;
+        if (points === 3) state.lastShooter.stats.threePointersMade += 1;
       }
       if (ball.lastPasser && ball.lastPasser.team === "away" && ball.lastPasser !== state.lastShooter) ball.lastPasser.stats.assists += 1;
       state.away += points;
@@ -1135,10 +1299,11 @@ function updateBall(dt) {
       return;
     }
 
-    const points = state.lastShooter && state.lastShooter.x < W - 360 ? 3 : 2;
+    const points = ball.target.points || 2;
     if (state.lastShooter) {
       state.lastShooter.stats.points += points;
       state.lastShooter.stats.fieldGoalsMade += 1;
+      if (points === 3) state.lastShooter.stats.threePointersMade += 1;
     }
     if (ball.lastPasser && ball.lastPasser.team === "home" && ball.lastPasser !== state.lastShooter) ball.lastPasser.stats.assists += 1;
     state.home += points;
@@ -1177,13 +1342,20 @@ function update(dt) {
   updateStatsPanel();
 
   if (!state.started) {
-    clockEl.textContent = "02:00";
+    updateClockDisplay();
+    shotMeterEl.style.width = "0%";
+    return;
+  }
+
+  if (state.paused) {
+    updateClockDisplay();
     shotMeterEl.style.width = "0%";
     return;
   }
 
   if (state.jumpBall) {
     updateJumpBall(dt);
+    updateClockDisplay();
     if (state.messageTimer > 0) {
       state.messageTimer -= dt;
       if (state.messageTimer <= 0) toastEl.classList.remove("show");
@@ -1194,7 +1366,9 @@ function update(dt) {
   if (!state.gameOver) {
     state.time = Math.max(0, state.time - dt);
     if (state.time === 0) {
-      if (state.home === state.away) {
+      if (state.period !== "OT" && state.quarter < REGULATION_QUARTERS) {
+        startNextQuarter();
+      } else if (state.home === state.away) {
         startOvertime();
       } else {
         endGame();
@@ -1224,9 +1398,26 @@ function update(dt) {
   updateAwayTeam(dt);
   updateBall(dt);
 
-  const seconds = Math.ceil(state.time);
-  clockEl.textContent = `${state.period === "OT" ? `OT${state.overtimeCount} ` : ""}${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  updateClockDisplay();
   shotMeterEl.style.width = `${Math.round(state.shotHold * 100)}%`;
+}
+
+function drawCenterCourtLogo() {
+  const team = centerCourtLogoState.team || state.team;
+  if (!team) return;
+
+  if (!centerCourtLogoState.ready || !centerCourtLogo.complete || centerCourtLogo.naturalWidth === 0) return;
+
+  ctx.save();
+  ctx.globalAlpha = 0.68;
+  ctx.beginPath();
+  ctx.arc(W / 2, H / 2, 78, 0, Math.PI * 2);
+  ctx.clip();
+
+  const size = 148;
+  ctx.drawImage(centerCourtLogo, W / 2 - size / 2, H / 2 - size / 2, size, size);
+
+  ctx.restore();
 }
 
 function drawCourt() {
@@ -1237,6 +1428,8 @@ function drawCourt() {
     ctx.fillStyle = y % 36 === 0 ? "rgba(255,255,255,0.035)" : "rgba(0,0,0,0.035)";
     ctx.fillRect(0, y, W, 18);
   }
+
+  drawCenterCourtLogo();
 
   ctx.strokeStyle = "#f5dfad";
   ctx.lineWidth = 5;
@@ -1505,6 +1698,18 @@ function draw() {
   drawActionFlash();
   drawJumpBallPrompt();
 
+  if (state.paused) {
+    ctx.fillStyle = "rgba(17, 15, 12, 0.62)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#f9f0d8";
+    ctx.font = "900 42px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText("PAUSED", W / 2, H / 2 - 12);
+    ctx.font = "700 18px system-ui";
+    ctx.fillText("Press P or tap Resume", W / 2, H / 2 + 28);
+    ctx.textAlign = "left";
+  }
+
   if (state.gameOver) {
     const mvp = gameMvp();
     const mvpLine = `${mvp.name} - ${fieldGoalLine(mvp.stats)} FG  ${mvp.stats.points} PTS  ${mvp.stats.assists} AST  ${mvp.stats.rebounds} REB`;
@@ -1540,19 +1745,21 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
   }
   if (key === "r") restart();
+  if (key === "p") {
+    togglePause();
+    return;
+  }
+  if (state.paused) return;
   if (key === "e") passBall();
   if (key === "q") stealBall();
   if (key === "f") blockShot();
   if (key === "c") dunkBall();
   if (event.code === "Space" && state.jumpBall) {
-    attemptJumpBall();
+    startShotCharge();
     keys.add(key);
     return;
   }
-  if (event.code === "Space" && !state.charging && ball.owner && ball.owner.team === "home") {
-    state.charging = true;
-    state.shotHold = 0;
-  }
+  if (event.code === "Space") startShotCharge();
   keys.add(key);
 });
 
@@ -1562,15 +1769,45 @@ window.addEventListener("keyup", (event) => {
     keys.delete(key);
     return;
   }
+  if (state.paused) {
+    keys.delete(key);
+    return;
+  }
   if (event.code === "Space" && state.charging) {
-    state.charging = false;
-    shoot();
-    state.shotHold = 0;
+    releaseShotCharge();
   }
   keys.delete(key);
 });
 
 setupTeamPicker();
+setupTouchControls();
+pauseGameEl.addEventListener("click", togglePause);
+updatePauseButton();
 applyTeamIdentity(nbaTeams[13], nbaTeams[1]);
 resetPlay("away");
+window.PixelCourt = {
+  nbaTeams,
+  state,
+  homeTeam,
+  awayTeam,
+  applyTeamIdentity,
+  restart,
+  announce,
+  setLeagueGameContext(context) {
+    state.leagueGameContext = context;
+    state.leagueResultReported = false;
+  },
+  clearLeagueGameContext() {
+    state.leagueGameContext = null;
+    state.leagueResultReported = false;
+  },
+  startPlayableGame(team, opponent, context) {
+    applyTeamIdentity(team, opponent);
+    state.started = true;
+    teamPickerEl.classList.add("hidden");
+    this.setLeagueGameContext(context || null);
+    restart();
+    announce(`${team.short} vs ${opponent.short}. Jump ball.`);
+  },
+};
 requestAnimationFrame(loop);

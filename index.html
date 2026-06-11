@@ -8,7 +8,38 @@
   </head>
   <body>
     <main class="game-shell">
-      <section class="scoreboard" aria-label="Scoreboard">
+      <section class="landing-page" id="landingPage" aria-label="Pixel Court home">
+        <div class="landing-hero">
+          <span class="label">Pixel Court</span>
+          <h1>Choose Your Game</h1>
+        </div>
+        <div class="landing-grid">
+          <article class="landing-card">
+            <span class="label">Quick Match</span>
+            <h2>One Game</h2>
+            <p>Pick two teams and jump straight to tip-off.</p>
+            <button id="landingOneGame" type="button">Start One Game</button>
+          </article>
+          <article class="landing-card">
+            <span class="label">Season Save</span>
+            <h2>League Mode</h2>
+            <p id="landingSaveSummary">No league save found.</p>
+            <div class="landing-actions">
+              <button id="landingContinueLeague" type="button" disabled>Continue League</button>
+              <button id="landingNewLeague" type="button">New League</button>
+              <button id="landingDeleteLeague" type="button" disabled>Delete League</button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="mode-bar play-surface hidden" aria-label="Game mode">
+        <button id="homeMode" class="mode-button" type="button">Home</button>
+        <button id="oneGameMode" class="mode-button is-active" type="button">One Game</button>
+        <button id="leagueMode" class="mode-button" type="button">League Mode</button>
+      </section>
+
+      <section class="scoreboard play-surface hidden" aria-label="Scoreboard">
         <div>
           <span class="team-title">
             <span class="team-badge" id="homeTeamLogo" aria-hidden="true"><img alt="" /></span>
@@ -18,7 +49,7 @@
         </div>
         <div>
           <span class="label">Clock</span>
-          <strong id="clock">02:00</strong>
+          <strong id="clock">Q1 02:00</strong>
         </div>
         <div>
           <span class="team-title">
@@ -29,7 +60,7 @@
         </div>
       </section>
 
-      <div class="court-wrap">
+      <div class="court-wrap play-surface hidden">
         <canvas id="court" width="960" height="540" aria-label="Pixel basketball court"></canvas>
         <section class="team-picker" id="teamPicker" aria-label="Choose your team">
           <div class="team-picker-panel">
@@ -44,7 +75,7 @@
         </section>
       </div>
 
-      <section class="hud" aria-label="Game controls and player status">
+      <section class="hud play-surface hidden" aria-label="Game controls and player status">
         <div class="meter">
           <span>Shot</span>
           <div class="meter-track"><i id="shotMeter"></i></div>
@@ -57,11 +88,35 @@
           <kbd>Q</kbd><span>Steal</span>
           <kbd>F</kbd><span>Block</span>
           <kbd>Shift</kbd><span>Sprint</span>
+          <button id="pauseGame" class="mini-button" type="button" aria-pressed="false">Pause</button>
+          <kbd>P</kbd><span>Pause</span>
           <kbd>R</kbd><span>Restart</span>
         </div>
       </section>
 
-      <section class="stats-panel" aria-label="Player stats">
+      <section class="touch-controls play-surface hidden" aria-label="Touch controls">
+        <div class="touch-pad" aria-label="Movement">
+          <div class="touch-pad-row touch-pad-row-top">
+            <button class="touch-btn" type="button" data-hold-key="w" aria-label="Move up">W</button>
+          </div>
+          <div class="touch-pad-row">
+            <button class="touch-btn" type="button" data-hold-key="a" aria-label="Move left">A</button>
+            <button class="touch-btn" type="button" data-hold-key="s" aria-label="Move down">S</button>
+            <button class="touch-btn" type="button" data-hold-key="d" aria-label="Move right">D</button>
+          </div>
+        </div>
+        <div class="touch-actions" aria-label="Actions">
+          <button class="touch-btn touch-shoot" type="button" data-shoot-control aria-label="Shoot or jump ball">Shoot</button>
+          <button class="touch-btn" type="button" data-action="dunkBall" aria-label="Dunk">Dunk</button>
+          <button class="touch-btn" type="button" data-action="passBall" aria-label="Pass">Pass</button>
+          <button class="touch-btn" type="button" data-action="stealBall" aria-label="Steal">Steal</button>
+          <button class="touch-btn" type="button" data-action="blockShot" aria-label="Block">Block</button>
+          <button class="touch-btn" type="button" data-hold-key="shift" aria-label="Sprint">Sprint</button>
+          <button class="touch-btn" type="button" data-action="togglePause" aria-label="Pause or resume">Pause</button>
+        </div>
+      </section>
+
+      <section class="stats-panel play-surface hidden" aria-label="Player stats">
         <div>
           <span class="label" id="homeStatsLabel">Home Stats</span>
           <div class="stats-list" id="homeStats"></div>
@@ -71,10 +126,43 @@
           <div class="stats-list" id="awayStats"></div>
         </div>
       </section>
+
+      <section class="league-panel hidden" id="leaguePanel" aria-label="League mode">
+        <div class="league-header">
+          <div>
+            <span class="label">League Mode</span>
+            <h2 id="leagueTitle">NBA League</h2>
+          </div>
+          <div class="league-actions">
+            <button id="leagueHome" type="button">Home</button>
+            <button id="newLeague" type="button">New League</button>
+            <button id="deleteLeague" type="button">Delete Save</button>
+          </div>
+        </div>
+
+        <div class="league-setup" id="leagueSetup">
+          <label class="select-label" for="leagueTeamSelect">Choose your league team</label>
+          <select id="leagueTeamSelect" aria-label="Your league team"></select>
+          <button id="startLeague" type="button">Start League</button>
+        </div>
+
+        <div class="league-hub hidden" id="leagueHub">
+          <div class="league-summary" id="leagueSummary"></div>
+          <nav class="league-tabs" aria-label="League views">
+            <button class="league-tab is-active" type="button" data-league-view="schedule">Schedule</button>
+            <button class="league-tab" type="button" data-league-view="standings">Standings</button>
+            <button class="league-tab" type="button" data-league-view="playin">Play-In</button>
+            <button class="league-tab" type="button" data-league-view="playoffs">Playoffs</button>
+            <button class="league-tab" type="button" data-league-view="boxscores">Boxscores</button>
+          </nav>
+          <div class="league-view" id="leagueView"></div>
+        </div>
+      </section>
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite">Tip-off. Create space and shoot.</div>
 
     <script src="game.js"></script>
+    <script src="league.js"></script>
   </body>
 </html>

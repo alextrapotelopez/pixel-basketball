@@ -2,6 +2,10 @@
 
 Pixel Court is a browser-based pixel basketball game with selectable NBA teams, real player names and jersey numbers, 5v5 play, live box score stats, team logos, and a serverless NBA-style league mode.
 
+## Links
+
+- GitHub Pages: https://alextrapotelopez.github.io/pixel-basketball/
+
 ## Features
 
 - Landing page with mode selection for `One Game` and `League Mode`
